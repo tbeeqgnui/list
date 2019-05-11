@@ -18,6 +18,7 @@ library vChain
         self.head = 0;
         self.last = 0;
         self.seed = 0;
+        self.amount = 0;
         return true;
     }
 
@@ -38,6 +39,7 @@ library vChain
             self.last = idx;
         }
         self.size++;
+        self.amount += val;
         return (idx, self.size);
     }
 
@@ -55,70 +57,89 @@ library vChain
             self.head = nextIdx;
         }
         self.size--;
+        self.amount -= val;
         return (guy, val);
     }
-
-    function popsbynum(list storage self, uint num) public returns (bool r, address[] memory g, uint[] memory v) {
-        require(self.size > 0, "Popsbynum: queue is empty");
-
-        uint idx = getHeadIdx(self);
+    
+    function popsbynum(list storage self, uint num) public returns (uint l, address[] memory g, uint[] memory v) {
+        require(self.amount > num && self.size > 0, "Popsbynum: pop exceed max nums.");
         address[] memory guys;
         uint[] memory vals;
+        uint[] memory idxs;
+        bool upd;
+        uint i;
+        uint newhead;
+
+        (l, idxs, guys, vals, upd) = _peek3idxbynumF(self, num);
+
+        if (0 != l) {
+            newhead = idxs[l-1];
+            if (true == upd) {
+                self.data[newhead].prevIdx = uint(-1);
+                self.head = newhead;
+                for (i = 0; i < l-1; i++) {
+                    delete self.data[idxs[i]];
+                    self.size--;
+                }
+                uint idx = idxs[i];
+                _updatebyidx(self, idx, self.data[idx].value-vals[i]);
+            } else {
+                newhead = self.data[newhead].nextIdx;
+                if (newhead != uint(-1)) {
+                    self.data[newhead].prevIdx = uint(-1);
+                    self.head = newhead;
+                }
+                for (i = 0; i < l; i++) {
+                    delete self.data[idxs[i]];
+                    self.size--;
+                }
+            }
+            self.amount -= num;
+            return (l, guys, vals);
+        } else {
+            return (l, guys, vals);
+        }
+    }
+
+    function _peek3idxbynumF(list storage self, uint num) public view returns (uint l, uint[] memory x, address[] memory g, uint[] memory v, bool u) {
+        uint idx = self.head;
+        address[] memory guys = new address[](self.size);
+        uint[] memory vals = new uint[](self.size);
+        uint[] memory idxs = new uint[](self.size);
         int res = int(num);
         uint i = 0;
         int val;
 
         //head
         guys[0] = self.data[idx].src;
+        idxs[0] = idx;
         val = int(self.data[idx].value);
-        if (res < val) {
+        if (res <= val) {
             vals[0] = uint(res);
-            _updatebyidx(self, idx, uint(val-res));
-            return (true, guys, vals);
-        } else if (res == val) {
-            vals[0] = uint(res);
-            uint x = getNextbyIdx(self, idx);
-            if (x != uint(-1)) {
-                self.data[x].prevIdx = uint(-1);
-                self.head = x;
-            }
-            self.size--;
-            return (true, guys, vals);
+            return (1, idxs, guys, vals, res==val?false:true);
         } else {
             res -= val;
             vals[i++] = uint(val);
-            self.size--;
         }
 
         while(res > 0 && i < self.size) {
             idx = getNextbyIdx(self, idx);
             if (idx != uint(-1)) {
                 guys[i] = self.data[idx].src;
+                idxs[i] = idx;
                 val = int(self.data[idx].value);
-                if (res < val) {
+                if (res <= val) {
                     vals[i] = uint(res);
-                    _updatebyidx(self, idx, uint(val-res));
-                    self.head = idx;
-                    return (true, guys, vals);
-                } else if (res == val) {
-                    vals[i] = uint(res);
-                    uint x = getNextbyIdx(self, idx);
-                    if (x != uint(-1)) {
-                        self.data[x].prevIdx = uint(-1);
-                        self.head = x;
-                    }
-                    self.size--;
-                    return (true, guys, vals);
+                    return (i+1, idxs, guys, vals, res==val?false:true);
                 } else {
                     res -= val;
                     vals[i++] = uint(val);
-                    self.size--;
                 }
             } else {
-                return (false, guys, vals);
+                return (0, idxs, guys, vals, false);
             }
         }
-        return (false, guys, vals);
+        return (0, idxs, guys, vals, false);
     }
 
     function withdraw1byidx(list storage self, uint idx) public returns (address g, uint v) {
@@ -142,10 +163,12 @@ library vChain
         }
         delete self.data[idx];
         self.size--;
+        self.amount -= val;
         return (guy, val);
     }
 
     function withdraw1byaddr(list storage self, address guy) public returns (bool r, uint x, uint v) {
+        require(self.size > 0, "Withdraw1byaddr: queue is empty.");
         bool ret;
         uint idx;
         uint val;
@@ -158,46 +181,46 @@ library vChain
         return (ret, idx, val);
     }
 
-    function withdraw3bynum(list storage self, address guy, uint num) public returns (bool r, uint[] memory x, uint v) {
-        bool ret;
+    function withdraw3bynum(list storage self, address guy, uint num) public returns (uint l, uint[] memory x, uint v) {
+        require(self.size > 0 && self.amount > num, "Withdraw3bynum: queue is not enough.");
         uint idx;
         uint i;
         uint val;
         uint[] memory idxs;
 
-        (ret, idxs, val) = _peek3idxbyaddrAnumB(self, guy, num);
-        if (true == ret) {
+        (l, idxs, val) = _peek3idxbyaddrAnumB(self, guy, num);
+        if (0 != l) {
             if (val != 0) {
-                for (i = 0; i < idxs.length-1; i++) {
+                for (i = 0; i < l-1; i++) {
                     idx = idxs[i];
                     withdraw1byidx(self, idx);
                 }
                 idx = idxs[i];
+                self.amount -= val;
                 _updatebyidx(self, idx, self.data[idx].value-val);
             } else {
-                for (i = 0; i < idxs.length; i++) {
+                for (i = 0; i < l; i++) {
                     idx = idxs[i];
                     withdraw1byidx(self, idx);
                 }
             }
-            return (true, idxs, val);
+            return (l, idxs, val);
         }
 
-        return (false, idxs, val);
+        return (l, idxs, val);
     }
 
-    function _updatebyidx(list storage self, uint idx, uint val) public returns (bool r, uint v) {
+    function _updatebyidx(list storage self, uint idx, uint val) public {
         uint value = self.data[idx].value;
         require(val < value, "Updatebyidx: target value is not correct.");
         self.data[idx].value = val;
-        return (true, val);
     }
 
-    function _peek3idxbyaddrAnumB(list storage self, address guy, uint num) public view returns (bool r, uint[] memory x, uint v) {
+    function _peek3idxbyaddrAnumB(list storage self, address guy, uint num) public view returns (uint l, uint[] memory x, uint v) {
         require(self.size > 0, "Peek3idxbyaddrAnumB: queue is empty");
 
         uint idx = getLastIdx(self);
-        uint[] memory idxs;
+        uint[] memory idxs = new uint[](self.size);
         int res = int(num);
         uint i = 0;
         uint j = 0;
@@ -208,9 +231,9 @@ library vChain
             idxs[0] = idx;
             val = int(self.data[idx].value);
             if (res < val) {
-                return (true, idxs, uint(res));
+                return (1, idxs, uint(res));
             } else if (res == val) {
-                return (true, idxs, uint(0));
+                return (1, idxs, uint(0));
             } else {
                 res -= val;
                 i++;
@@ -223,18 +246,18 @@ library vChain
                 idxs[i++] = idx;
                 val = int(self.data[idx].value);
                 if (res < val) {
-                    return (true, idxs, uint(res));
+                    return (i, idxs, uint(res));
                 } else if (res == val) {
-                    return (true, idxs, uint(0));
+                    return (i, idxs, uint(0));
                 } else {
                     res -= val;
                 }
             } else if (uint(-1) == idx) {
-                return (false, idxs, uint(res));
+                return (0, idxs, uint(res));
             }
         }
 
-        return (false, idxs, uint(res));
+        return (0, idxs, uint(res));
     }
 
     function _peek1idxbyaddrB(list storage self, address guy) public view returns (bool r, uint x, uint v) {
@@ -300,15 +323,35 @@ contract Main
     function cPush(uint val) public returns (uint x, uint s) {
         return vChain.push(data, msg.sender, val);
     }
+    
+    function cPushLoop(int loop) public {
+        int i = 0;
+        uint v = 50;
+        while (i++ < loop) {
+            vChain.push(data, msg.sender, v);
+            v += 10;
+        }
+    }
+    
+    function cPeekbyNum(uint num) public view returns (uint l, uint[] memory x, address[] memory g, uint[] memory v, bool u) {
+        return vChain._peek3idxbynumF(data, num);
+    }
 
     function cPopbyNum(uint num) public returns (address[] memory g, uint[] memory v) {
-        bool r;
-        (r, g, v) = vChain.popsbynum(data, num);
+        uint l;
+        (l, g, v) = vChain.popsbynum(data, num);
         return (g, v);
     }
 
     function cPop() public returns (address g, uint v) {
         return vChain.pop(data);
+    }
+    
+    function cPopLoop(int loop) public {
+        int i = 0;
+        while (i++ < loop) {
+            vChain.pop(data);
+        }
     }
 
     function cWithdraw(uint idx) public returns (address g, uint v) {
@@ -322,8 +365,8 @@ contract Main
     }
 
     function cWithdrawbyNum(address guy, uint num) public returns (uint[] memory x, uint v) {
-        bool r;
-        (r, x, v) = vChain.withdraw3bynum(data, guy, num);
+        uint l;
+        (l, x, v) = vChain.withdraw3bynum(data, guy, num);
         return (x, v);
     }
 
@@ -358,12 +401,109 @@ contract Main
     function getSize() public view returns (uint s) {
         return data.size;
     }
+    
+    function getAmount() public view returns (uint a) {
+        return data.amount;
+    }
 
     function getSeed() public view returns (uint s) {
         return data.seed;
     }
+    
+    function loopIdxForward() public view returns (uint[] memory xs) {
+        require(data.size > 0, "LoopIdxForward: queue is empty.");
+        uint[] memory idxs = new uint[](data.size);
+        uint x = vChain.getHeadIdx(data);
+        uint i = 0;
+        idxs[i++] = x;
+        x = vChain.getNextbyIdx(data, x);
+        while (x != uint(-1)) {
+            idxs[i++] = x;
+            x = vChain.getNextbyIdx(data, x);
+        }
+        return (idxs);
+    }
+
+    function getBalanceAIdx(address guy) public view returns (uint[] memory xs, uint[] memory vs, uint b) {
+        require(data.size > 0, "GetBalanceAIdx: queue is empty.");
+        uint[] memory idxs = new uint[](data.size);
+        uint[] memory vals = new uint[](data.size);
+        uint x = vChain.getHeadIdx(data);
+        uint i = 0;
+        uint v;
+        address g;
+        b = 0;
+        (g, v) = vChain.getValueByIdx(data, x);
+        if (g == guy) {
+            idxs[i] = x;
+            vals[i++] = v;
+            b += v;
+        }
+        x = vChain.getNextbyIdx(data, x);
+        while (x != uint(-1)) {
+            (g, v) = vChain.getValueByIdx(data, x);
+            if (g == guy) {
+                idxs[i] = x;
+                vals[i++] = v;
+                b += v;
+            }
+            x = vChain.getNextbyIdx(data, x);
+        }
+        return (idxs, vals, b);
+    }
+    
+    function loopIdxBackward() public view returns (uint[] memory xs) {
+        require(data.size > 0, "LoopIdxBackward: queue is empty.");
+        uint[] memory idxs = new uint[](data.size);
+        uint x = vChain.getLastIdx(data);
+        uint i = 0;
+        idxs[i++] = x;
+        x = vChain.getPrevbyIdx(data, x);
+        while (x != uint(-1)) {
+            idxs[i++] = x;
+            x = vChain.getPrevbyIdx(data, x);
+        }
+        return (idxs);
+    }
+    
+    function loopValue() public view returns (uint[] memory vs) {
+        require(data.size > 0, "LoopValue: queue is empty.");
+        uint[] memory vals = new uint[](data.size);
+        uint x = vChain.getHeadIdx(data);
+        uint v;
+        uint i = 0;
+        address g;
+        (g, v) = vChain.getValueByIdx(data, x);
+        vals[i++] = v;
+        x = vChain.getNextbyIdx(data, x);
+        while (x != uint(-1)) {
+            (g, v) = vChain.getValueByIdx(data, x);
+            vals[i++] = v;
+            x = vChain.getNextbyIdx(data, x);
+        }
+        return (vals);
+    }
+    
+    function loopAddress() public view returns (address[] memory gs) {
+        require(data.size > 0, "LoopAddress: queue is empty.");
+        address[] memory guys = new address[](data.size);
+        uint x = vChain.getHeadIdx(data);
+        uint v;
+        address g;
+        uint i = 0;
+        (g, v) = vChain.getValueByIdx(data, x);
+        guys[i++] = g;
+        x = vChain.getNextbyIdx(data, x);
+        while (x != uint(-1)) {
+            (g, v) = vChain.getValueByIdx(data, x);
+            guys[i++] = g;
+            x = vChain.getNextbyIdx(data, x);
+        }
+        return (guys);
+    }
 
     function loopForward() public {
+        require(data.size > 0, "LoopForward: queue is empty.");
         uint x = vChain.getHeadIdx(data);
         int loop = int(data.size);
 
@@ -378,6 +518,7 @@ contract Main
     }
 
     function loopBackward() public {
+        require(data.size > 0, "LoopBackward: queue is empty.");
         uint x = vChain.getLastIdx(data);
         int loop = int(data.size);
 
